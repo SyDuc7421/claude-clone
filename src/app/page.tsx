@@ -1,65 +1,287 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useRef, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { AppSidebar } from "@/components/app-sidebar";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  ChevronDown,
+  Paperclip,
+  ArrowUp,
+  Globe,
+  MoreHorizontal,
+  PenLine,
+  ThumbsUp,
+  ThumbsDown,
+  Copy,
+  RotateCcw,
+  Plus,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+// Types
+type Message = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
+
+// Simulated API
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const mockApi = {
+  sendMessage: async (message: string): Promise<Message> => {
+    await delay(1500);
+    return {
+      id: Date.now().toString(),
+      role: "assistant",
+      content: `Here is a simulated response to: "${message}". Using Shadcn UI with Tailwind CSS and Tanstack React Query creates a modern, sleek workflow.`,
+    };
+  },
+};
+
+export default function ChatPage() {
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: "init",
+      role: "assistant",
+      content:
+        "Hello! I am ready to help. I am built with Next.js, Shadcn UI, and TanStack Query.",
+    },
+  ]);
+  const [input, setInput] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: mockApi.sendMessage,
+    onSuccess: (data) => {
+      setMessages((prev) => [...prev, data]);
+    },
+  });
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!input.trim() || mutation.isPending) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: input,
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    mutation.mutate(input);
+    setInput("");
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <SidebarProvider>
+      <AppSidebar />
+      <div className="flex flex-col flex-1 h-screen bg-white transition-all w-full min-w-0 font-sans">
+        {/* Header */}
+        <header className="flex items-center justify-between px-4 py-3 bg-white z-10 sticky top-0">
+          <div className="flex items-center gap-2">
+            <SidebarTrigger className="text-zinc-500 hover:text-zinc-800" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="gap-2 text-[15px] font-medium text-zinc-700 hover:bg-zinc-100 flex items-center h-9 px-3 rounded-xl"
+                >
+                  Claude 3.5 Sonnet
+                  <ChevronDown className="h-4 w-4 text-zinc-400" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-[240px] rounded-xl">
+                <DropdownMenuItem className="py-2.5">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-[14px]">Claude 3.5 Sonnet</span>
+                    <span className="text-xs text-zinc-500">Fastest and most intelligent</span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="py-2.5">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-[14px]">Claude 3 Opus</span>
+                    <span className="text-xs text-zinc-500">Powerful for complex tasks</span>
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <Avatar className="h-8 w-8 cursor-pointer hover:opacity-80 transition-opacity">
+            <AvatarImage src="" />
+            <AvatarFallback className="bg-orange-100 text-orange-800 text-sm font-medium">U</AvatarFallback>
+          </Avatar>
+        </header>
+
+        {/* Chat Area */}
+        <ScrollArea className="flex-1 w-full flex flex-col items-center pb-8" ref={scrollRef}>
+          <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 md:px-8 py-6 flex flex-col gap-8">
+            {messages.length === 1 && (
+              <div className="flex flex-col items-center justify-center h-[40vh] text-center max-w-lg mx-auto space-y-4">
+                <Avatar className="h-16 w-16 bg-[#d97757] text-[#f4efe6]">
+                  <AvatarFallback className="bg-[#d97757] text-[#f4efe6]">C</AvatarFallback>
+                </Avatar>
+                <h2 className="text-2xl font-medium tracking-tight text-zinc-800">
+                  Good evening
+                </h2>
+                <div className="grid grid-cols-2 gap-3 w-full mt-8">
+                  <Button variant="outline" className="h-auto py-3 px-4 justify-start text-left text-[14px] text-zinc-600 font-normal rounded-xl hover:bg-zinc-50 border-zinc-200">
+                    Extract text from image
+                  </Button>
+                  <Button variant="outline" className="h-auto py-3 px-4 justify-start text-left text-[14px] text-zinc-600 font-normal rounded-xl hover:bg-zinc-50 border-zinc-200">
+                    Help me write an essay
+                  </Button>
+                  <Button variant="outline" className="h-auto py-3 px-4 justify-start text-left text-[14px] text-zinc-600 font-normal rounded-xl hover:bg-zinc-50 border-zinc-200">
+                    Summarize an article
+                  </Button>
+                  <Button variant="outline" className="h-auto py-3 px-4 justify-start text-left text-[14px] text-zinc-600 font-normal rounded-xl hover:bg-zinc-50 border-zinc-200">
+                    Brainstorm ideas
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {messages.map((m, idx) => (
+              m.id !== "init" || messages.length > 1 ? (
+                <div
+                  key={m.id + idx}
+                  className={cn(
+                    "flex w-full",
+                    m.role === "user" ? "justify-end" : "justify-start"
+                  )}
+                >
+                  <div className={cn("flex max-w-[85%] gap-4 rounded-xl",
+                    m.role === "assistant" ? "" : "bg-[#f4f4f4] px-5 py-4"
+                  )}>
+                    {m.role === "assistant" && (
+                      <Avatar className="h-8 w-8 mt-0.5 shrink-0 bg-[#d97757] text-[#f4efe6]">
+                        <AvatarFallback className="bg-[#d97757] text-[#f4efe6]">C</AvatarFallback>
+                      </Avatar>
+                    )}
+                    <div className="flex flex-col gap-1 w-full min-w-0">
+                      {m.role === "assistant" && (
+                        <span className="text-[14px] font-semibold text-zinc-800">Claude</span>
+                      )}
+                      <div className={cn(
+                        "prose prose-sm break-words max-w-none text-[15px] leading-relaxed",
+                        m.role === "assistant" ? "text-zinc-800" : "text-zinc-800"
+                      )}>
+                        {m.content}
+                      </div>
+
+                      {/* Assistant Message Actions */}
+                      {m.role === "assistant" && (
+                        <div className="flex items-center gap-1 mt-2 -ml-2 text-zinc-400">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
+                            <RotateCcw className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
+                            <ThumbsUp className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
+                            <ThumbsDown className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null
+            ))}
+
+            {mutation.isPending && (
+              <div className="flex w-full justify-start">
+                <div className="flex max-w-[85%] gap-4">
+                  <Avatar className="h-8 w-8 mt-0.5 shrink-0 bg-[#d97757] text-[#f4efe6]">
+                    <AvatarFallback className="bg-[#d97757] text-[#f4efe6]">C</AvatarFallback>
+                  </Avatar>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[14px] font-semibold text-zinc-800">Claude</span>
+                    <div className="flex items-center gap-1 h-6">
+                      <span className="h-2 w-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
+                      <span className="h-2 w-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
+                      <span className="h-2 w-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+
+        {/* Input Area */}
+        <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 md:px-8 pb-6 bg-white shrink-0">
+          <form
+            onSubmit={handleSubmit}
+            className="relative flex flex-col w-full border border-zinc-200 shadow-sm bg-zinc-50/50 rounded-2xl focus-within:ring-1 focus-within:ring-zinc-300 focus-within:border-zinc-300 transition-all"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            <Textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="How can Claude help you today?"
+              className="resize-none min-h-[50px] max-h-[250px] bg-transparent border-0 focus-visible:ring-0 py-3.5 px-4 text-[15px] placeholder:text-zinc-400 scrollbar-thin"
+              rows={1}
+              style={{ height: 'auto', minHeight: '60px' }}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <div className="flex items-center justify-between px-3 pb-3">
+              <div className="flex items-center gap-1">
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-zinc-500 rounded-xl hover:text-zinc-800 hover:bg-zinc-200/50">
+                  <Plus className="h-[18px] w-[18px]" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-zinc-500 rounded-xl hover:text-zinc-800 hover:bg-zinc-200/50">
+                  <Globe className="h-[18px] w-[18px]" />
+                </Button>
+              </div>
+
+              <Button
+                type="submit"
+                size="icon"
+                disabled={!input.trim() || mutation.isPending}
+                className={cn(
+                  "h-8 w-8 rounded-lg transition-all",
+                  input.trim()
+                    ? "bg-[#d97757] text-white hover:bg-[#c4694a]"
+                    : "bg-zinc-200 text-zinc-400 cursor-not-allowed"
+                )}
+              >
+                <ArrowUp className="h-[18px] w-[18px]" />
+              </Button>
+            </div>
+          </form>
+          <div className="text-center mt-3 text-xs text-zinc-500 font-medium">
+            Claude can make mistakes. Please double-check responses.
+          </div>
         </div>
-      </main>
-    </div>
+      </div>
+    </SidebarProvider>
   );
 }
