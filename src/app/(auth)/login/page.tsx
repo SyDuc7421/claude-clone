@@ -41,15 +41,16 @@ export default function LoginPage() {
 
     const loginMutation = useMutation({
         mutationFn: authApi.login,
-        onSuccess: (data, variables) => {
+        onSuccess: async (data, variables) => {
             localStorage.setItem('access_token', data.access_token);
             localStorage.setItem('refresh_token', data.refresh_token);
-            // Mocking user profile state for context
-            login({
-                id: "resolved-user",
-                name: variables.email.split("@")[0],
-                email: variables.email,
-            });
+            try {
+                const user = await authApi.getMe();
+                login(user);
+            } catch (err) {
+                console.error("Failed to fetch user profile", err);
+                form.setError("root", { message: "Failed to retrieve user profile" });
+            }
         },
         onError: (error: Error | unknown) => {
             console.error("Login failed", error);

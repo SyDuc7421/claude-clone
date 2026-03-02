@@ -49,15 +49,15 @@ export default function RegisterPage() {
 
     const loginMutation = useMutation({
         mutationFn: authApi.login,
-        onSuccess: (data, variables) => {
+        onSuccess: async (data, variables) => {
             localStorage.setItem('access_token', data.access_token);
             localStorage.setItem('refresh_token', data.refresh_token);
-            // mock a user to satisfy AuthContext until /me is added
-            login({
-                id: "resolved-user",
-                name: form.getValues().name,
-                email: variables.email,
-            });
+            try {
+                const user = await authApi.getMe();
+                login(user);
+            } catch (err) {
+                console.error("Failed to fetch user profile", err);
+            }
         }
     });
 

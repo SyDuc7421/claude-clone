@@ -2,12 +2,9 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { authApi } from "./api/auth";
 
-export type User = {
-    id: string;
-    name: string;
-    email: string;
-};
+import { User } from "./types/api";
 
 type AuthContextType = {
     user: User | null;
@@ -36,7 +33,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setUser(initialUser);
-        setIsLoading(false);
+
+        // Fetch fresh user data from server if we have a token
+        const fetchUser = async () => {
+            const token = localStorage.getItem("access_token");
+            if (token) {
+                try {
+                    const freshUser = await authApi.getMe();
+                    setUser(freshUser);
+                    localStorage.setItem("auth_user", JSON.stringify(freshUser));
+                } catch (e) {
+                    console.error("Token might be invalid", e);
+                }
+            }
+            setIsLoading(false);
+        };
+        fetchUser();
     }, []);
 
     useEffect(() => {
