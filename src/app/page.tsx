@@ -47,6 +47,7 @@ import {
   Moon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth";
 
 // Types
 type Message = {
@@ -71,7 +72,7 @@ const mockApi = {
 };
 
 export default function ChatPage() {
-  const [chats, setChats] = useState<ChatItem[]>([
+  const [chats, setChats] = useState<ChatItem[]>(() => [
     { id: "init-chat", title: "New Chat", updatedAt: Date.now() },
   ]);
   const [activeChatId, setActiveChatId] = useState<string>("init-chat");
@@ -91,7 +92,7 @@ export default function ChatPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const queryClient = useQueryClient();
+  const { user, logout, isLoading: authLoading } = useAuth();
 
   const currentMessages = chatHistories[activeChatId] || [];
 
@@ -157,9 +158,12 @@ export default function ChatPage() {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const mutation = useMutation({
-    mutationFn: mockApi.sendMessage,
-    onSuccess: (data, variables, context: any) => {
+  const mutation = useMutation<Message, Error, string, { chatId?: string }>({
+    mutationFn: (message: string) => mockApi.sendMessage(message),
+    onMutate: async (message) => {
+      return { chatId: activeChatId };
+    },
+    onSuccess: (data, variables, context) => {
       const targetChatId = context?.chatId || activeChatId;
       setChatHistories(prev => ({
         ...prev,
@@ -205,9 +209,11 @@ export default function ChatPage() {
 
     const prompt = input + (files.length > 0 ? ` [Attached ${files.length} file(s)]` : "");
     mutation.mutate(prompt, {
-      // pass context to ensure respond matches the chat it was sent from
-      context: { chatId: currentChatId }
-    } as any);
+      onSuccess: (data) => {
+        // We can pass context directly here or handle it in the global onSuccess
+        // Let's rely on the global onSuccess for consistency
+      }
+    });
 
     setInput("");
     setFiles([]);
@@ -224,7 +230,11 @@ export default function ChatPage() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [currentMessages, mutation.isPending]);
+  }, [currentMessages.length, mutation.isPending]); // Use .length instead of the array reference
+
+  if (authLoading || !user) {
+    return <div className="flex h-screen items-center justify-center bg-zinc-50">Loading...</div>;
+  }
 
   return (
     <SidebarProvider>
@@ -271,15 +281,15 @@ export default function ChatPage() {
             <DropdownMenuTrigger asChild>
               <Avatar className="h-8 w-8 cursor-pointer hover:opacity-80 transition-opacity">
                 <AvatarImage src="" />
-                <AvatarFallback className="bg-orange-100 text-orange-800 text-sm font-medium">U</AvatarFallback>
+                <AvatarFallback className="bg-orange-100 text-orange-800 text-sm font-medium">{user.name.charAt(0).toUpperCase()}</AvatarFallback>
               </Avatar>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 rounded-xl">
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">User</p>
+                  <p className="text-sm font-medium leading-none">{user.name}</p>
                   <p className="text-xs leading-none text-muted-foreground">
-                    user@example.com
+                    {user.email}
                   </p>
                 </div>
               </DropdownMenuLabel>
@@ -295,7 +305,7 @@ export default function ChatPage() {
                 </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer text-red-600 focus:text-red-700 focus:bg-red-50">
+              <DropdownMenuItem className="cursor-pointer text-red-600 focus:text-red-700 focus:bg-red-50" onClick={logout}>
                 <LogOut className="mr-2 h-4 w-4" />
                 <span>Log out</span>
               </DropdownMenuItem>
