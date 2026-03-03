@@ -21,7 +21,6 @@ export const useMessage = (id: number | string) => {
 };
 
 export const useCreateMessageMutation = () => {
-    const queryClient = useQueryClient();
     return useMutation({
         mutationFn: (data: CreateMessageRequest) => messagesApi.create(data),
     });

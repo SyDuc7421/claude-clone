@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { AppSidebar, ChatItem } from "@/components/app-sidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
@@ -70,7 +70,12 @@ export default function ChatPage() {
   const updateConversation = useUpdateConversationMutation();
   const deleteConversation = useDeleteConversationMutation();
 
-  const [activeChatId, setActiveChatId] = useState<string>("");
+  const [_activeChatId, setActiveChatId] = useState<string>("");
+  // Derive activeChatId during render — avoids setState in effect
+  const activeChatId = _activeChatId ||
+    (!isConversationsLoading && serverConversations?.length
+      ? serverConversations[0].id.toString()
+      : "");
 
   const { data: serverMessages, isLoading: isMessagesLoading } = useMessages(
     activeChatId ? activeChatId : ""
@@ -78,41 +83,29 @@ export default function ChatPage() {
   const createMessage = useCreateMessageMutation();
 
 
-  const chats: ChatItem[] = (serverConversations || []).map((c) => ({
+  const chats: ChatItem[] = useMemo(() => (serverConversations || []).map((c) => ({
     id: c.id.toString(),
     title: c.title || "New Chat",
-    updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
-  }));
+    updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : new Date().getTime(),
+  })), [serverConversations]);
 
-  const [currentMessages, setCurrentMessages] = useState<UIMessage[]>([]);
-
-
-  // Ensure active chat selection on first load if we have chats
-  useEffect(() => {
-    if (!isConversationsLoading && serverConversations && serverConversations.length > 0 && !activeChatId) {
-      setActiveChatId(serverConversations[0].id.toString());
-    }
-  }, [serverConversations, isConversationsLoading, activeChatId]);
-
-  useEffect(() => {
-    if (serverMessages) {
-      setCurrentMessages(serverMessages);
-    }
-  }, [serverMessages]);
+  // null = use serverMessages as source of truth; array = local/optimistic messages
+  const [localMessages, setLocalMessages] = useState<UIMessage[] | null>(null);
+  const currentMessages: UIMessage[] = localMessages ?? ((serverMessages as UIMessage[]) || []);
 
   const handleNewChat = async () => {
     const newConv = await createConversation.mutateAsync({ title: "New Chat" });
     setActiveChatId(newConv.id.toString());
     setInput("");
     setFiles([]);
-    setCurrentMessages([]);
+    setLocalMessages([]);
   };
 
   const handleSelectChat = (id: string) => {
     setActiveChatId(id);
     setInput("");
     setFiles([]);
-    setCurrentMessages([]);
+    setLocalMessages(null);
   };
 
   const handleRenameChat = (id: string, newTitle: string) => {
@@ -130,6 +123,7 @@ export default function ChatPage() {
           } else {
             setActiveChatId("");
           }
+          setLocalMessages(null);
         }
       }
     });
@@ -149,12 +143,15 @@ export default function ChatPage() {
     e?.preventDefault();
     if ((!input.trim() && files.length === 0) || createMessage.isPending) return;
 
-    let targetConversationId = activeChatId;
+    const targetConversationId = activeChatId;
 
     const messageContent = input.trim();
 
 
-    setCurrentMessages((prev) => [...prev, { content: messageContent, role: "user", id: Date.now(), conversation_id: parseInt(targetConversationId as string) }]);
+    setLocalMessages((prev) => [
+      ...(prev ?? (serverMessages as UIMessage[]) ?? []),
+      { content: messageContent, role: "user", id: Date.now(), conversation_id: parseInt(targetConversationId as string) },
+    ]);
     setInput("");
     setFiles([]);
 
@@ -165,11 +162,10 @@ export default function ChatPage() {
     }, {
       onSettled: (data, error) => {
         if (data && data.user_message && data.assistant_message) {
-          setCurrentMessages((prev) => {
-            // remove sending message
-            prev.pop();
-            const newMessages = [...prev, data.user_message, data.assistant_message];
-            return newMessages;
+          setLocalMessages((prev) => {
+            const copy = [...(prev ?? [])];
+            copy.pop(); // remove optimistic message
+            return [...copy, data.user_message, data.assistant_message];
           });
         }
         if (error) {

@@ -3,7 +3,6 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useMutation } from "@tanstack/react-query";
 import { authApi } from "@/lib/api/auth";
@@ -34,8 +33,6 @@ type RegisterFormValues = z.infer<typeof registerSchema>;
 
 export default function RegisterPage() {
     const { login } = useAuth();
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const router = useRouter();
 
     const form = useForm<RegisterFormValues>({
         resolver: zodResolver(registerSchema),
@@ -49,7 +46,7 @@ export default function RegisterPage() {
 
     const loginMutation = useMutation({
         mutationFn: authApi.login,
-        onSuccess: async (data, variables) => {
+        onSuccess: async (data) => {
             localStorage.setItem('access_token', data.access_token);
             localStorage.setItem('refresh_token', data.refresh_token);
             try {
