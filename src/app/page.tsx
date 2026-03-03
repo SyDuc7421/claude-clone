@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppSidebar, ChatItem } from "@/components/app-sidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
@@ -23,12 +22,10 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import {
   ChevronDown,
-  Paperclip,
   ArrowUp,
   Globe,
   MoreHorizontal,
@@ -48,45 +45,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
-
-// Types
-type Message = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  files?: { name: string; type: string }[];
-};
-
-// Simulated API
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const mockApi = {
-  sendMessage: async (message: string): Promise<Message> => {
-    await delay(1500);
-    return {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: `Here is a simulated response to: "${message}". Using Shadcn UI with Tailwind CSS and Tanstack React Query creates a modern, sleek workflow.`,
-    };
-  },
-};
+import {
+  useConversations,
+  useCreateConversationMutation,
+  useUpdateConversationMutation,
+  useDeleteConversationMutation
+} from "@/hooks/useConversations";
+import { useMessages, useCreateMessageMutation } from "@/hooks/useMessages";
 
 export default function ChatPage() {
-  const [chats, setChats] = useState<ChatItem[]>(() => [
-    { id: "init-chat", title: "New Chat", updatedAt: Date.now() },
-  ]);
-  const [activeChatId, setActiveChatId] = useState<string>("init-chat");
-  const [chatHistories, setChatHistories] = useState<Record<string, Message[]>>({
-    "init-chat": [
-      {
-        id: "init",
-        role: "assistant",
-        content:
-          "Hello! I am ready to help. I am built with Next.js, Shadcn UI, and TanStack Query. I now support multiple conversations too!",
-      },
-    ],
-  });
-
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -94,57 +61,102 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { user, logout, isLoading: authLoading } = useAuth();
 
-  const currentMessages = chatHistories[activeChatId] || [];
+  const { data: serverConversations, isLoading: isConversationsLoading } = useConversations();
+  const createConversation = useCreateConversationMutation();
+  const updateConversation = useUpdateConversationMutation();
+  const deleteConversation = useDeleteConversationMutation();
+
+  const [activeChatId, setActiveChatId] = useState<string>("init-chat");
+
+  const { data: serverMessages, isLoading: isMessagesLoading } = useMessages(
+    activeChatId === "init-chat" || !activeChatId ? "" : activeChatId
+  );
+  const createMessage = useCreateMessageMutation();
+
+  const [optimisticUserMessage, setOptimisticUserMessage] = useState<{ content: string; files: any[] } | null>(null);
+
+  const chats: ChatItem[] = (serverConversations || []).map((c) => ({
+    id: c.id.toString(),
+    title: c.title || "New Chat",
+    updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
+  }));
+
+  // Add the virtual 'init-chat' if it's the active one
+  const displayChats = activeChatId === "init-chat"
+    ? [{ id: "init-chat", title: "New Chat", updatedAt: Date.now() }, ...chats]
+    : chats;
+
+  // We map the server messages to our UI representation.
+  let currentMessages = activeChatId === "init-chat"
+    ? [
+      {
+        id: "init",
+        role: "assistant" as const,
+        content: "Hello! I am ready to help. I am built with Next.js, Shadcn UI, and TanStack Query. I now support multiple conversations too!",
+        files: [] as { name: string; type: string }[]
+      }
+    ]
+    : (serverMessages || []).map(m => ({
+      id: m.id.toString(),
+      role: m.role as "user" | "assistant" | "system",
+      content: m.content,
+      files: [] as { name: string; type: string }[]
+    }));
+
+  if (optimisticUserMessage) {
+    currentMessages = [
+      ...currentMessages,
+      {
+        id: "optimistic",
+        role: "user",
+        content: optimisticUserMessage.content,
+        files: optimisticUserMessage.files
+      }
+    ];
+  }
+
+  // Ensure active chat selection on first load if we have chats
+  useEffect(() => {
+    if (!isConversationsLoading && serverConversations && serverConversations.length > 0 && activeChatId === "init-chat") {
+      setActiveChatId(serverConversations[0].id.toString());
+    }
+  }, [serverConversations, isConversationsLoading, activeChatId]);
 
   const handleNewChat = () => {
-    const newChatId = Date.now().toString();
-    setChats([{ id: newChatId, title: "New Chat", updatedAt: Date.now() }, ...chats]);
-    setChatHistories({
-      ...chatHistories,
-      [newChatId]: [
-        {
-          id: "init",
-          role: "assistant",
-          content: "Hello! I am ready to help.",
-        },
-      ],
-    });
-    setActiveChatId(newChatId);
+    setActiveChatId("init-chat");
     setInput("");
     setFiles([]);
+    setOptimisticUserMessage(null);
   };
 
   const handleSelectChat = (id: string) => {
     setActiveChatId(id);
     setInput("");
     setFiles([]);
+    setOptimisticUserMessage(null);
   };
 
   const handleRenameChat = (id: string, newTitle: string) => {
-    setChats(chats.map(c => c.id === id ? { ...c, title: newTitle } : c));
+    if (id !== "init-chat") {
+      updateConversation.mutate({ id, data: { title: newTitle } });
+    }
   };
 
   const handleDeleteChat = (id: string) => {
-    const newChats = chats.filter(c => c.id !== id);
-    setChats(newChats);
-
-    // Cleanup history
-    const newHistories = { ...chatHistories };
-    delete newHistories[id];
-    setChatHistories(newHistories);
-
-    // If active chat deleted, switch to another or create new
-    if (activeChatId === id) {
-      if (newChats.length > 0) {
-        setActiveChatId(newChats[0].id);
-      } else {
-        const newChatId = Date.now().toString();
-        setChats([{ id: newChatId, title: "New Chat", updatedAt: Date.now() }]);
-        setChatHistories({
-          [newChatId]: [{ id: "init", role: "assistant", content: "Hello! I am ready to help." }],
-        });
-        setActiveChatId(newChatId);
-      }
+    if (id !== "init-chat") {
+      deleteConversation.mutate(id, {
+        onSuccess: () => {
+          if (activeChatId === id) {
+            const index = chats.findIndex(c => c.id === id);
+            if (chats.length > 1) {
+              const nextChat = chats[index === 0 ? 1 : index - 1];
+              setActiveChatId(nextChat.id);
+            } else {
+              setActiveChatId("init-chat");
+            }
+          }
+        }
+      });
     }
   };
 
@@ -158,65 +170,42 @@ export default function ChatPage() {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const mutation = useMutation<Message, Error, string, { chatId?: string }>({
-    mutationFn: (message: string) => mockApi.sendMessage(message),
-    onMutate: async (message) => {
-      return { chatId: activeChatId };
-    },
-    onSuccess: (data, variables, context) => {
-      const targetChatId = context?.chatId || activeChatId;
-      setChatHistories(prev => ({
-        ...prev,
-        [targetChatId]: [...(prev[targetChatId] || []), data]
-      }));
-    },
-  });
-
-  const handleSubmit = (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if ((!input.trim() && files.length === 0) || mutation.isPending) return;
+    if ((!input.trim() && files.length === 0) || createMessage.isPending) return;
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: input,
-      files: files.map((f) => ({ name: f.name, type: f.type })),
-    };
+    let targetConversationId = activeChatId;
 
-    const currentChatId = activeChatId;
+    const messageContent = input.trim();
+    const prompt = messageContent + (files.length > 0 ? ` [Attached ${files.length} file(s)]` : "");
 
-    // Update message history
-    setChatHistories(prev => ({
-      ...prev,
-      [currentChatId]: [...(prev[currentChatId] || []), userMessage]
-    }));
-
-    // Extract title from first user message if it's currently "New Chat"
-    const chat = chats.find(c => c.id === currentChatId);
-    if (chat && chat.title === "New Chat" && currentMessages.length === 1) {
-      const generatedTitle = input.trim().slice(0, 30) + (input.length > 30 ? "..." : "");
-      if (generatedTitle) {
-        setChats(prev => prev.map(c =>
-          c.id === currentChatId ? { ...c, title: generatedTitle, updatedAt: Date.now() } : c
-        ));
-      }
-    } else {
-      // Just update timestamp
-      setChats(prev => prev.map(c =>
-        c.id === currentChatId ? { ...c, updatedAt: Date.now() } : c
-      ));
-    }
-
-    const prompt = input + (files.length > 0 ? ` [Attached ${files.length} file(s)]` : "");
-    mutation.mutate(prompt, {
-      onSuccess: (data) => {
-        // We can pass context directly here or handle it in the global onSuccess
-        // Let's rely on the global onSuccess for consistency
-      }
-    });
-
+    // Set optimistic UI immediately
+    setOptimisticUserMessage({ content: messageContent, files: files.map(f => ({ name: f.name, type: f.type })) });
     setInput("");
     setFiles([]);
+
+    if (targetConversationId === "init-chat") {
+      const generatedTitle = messageContent.slice(0, 30) + (messageContent.length > 30 ? "..." : "");
+      try {
+        const newConv = await createConversation.mutateAsync({ title: generatedTitle || "New Chat" });
+        targetConversationId = newConv.id.toString();
+        setActiveChatId(targetConversationId);
+      } catch (err) {
+        console.error("Failed to create conversation", err);
+        setOptimisticUserMessage(null);
+        return;
+      }
+    }
+
+    createMessage.mutate({
+      content: prompt,
+      conversation_id: parseInt(targetConversationId as string),
+      role: "user"
+    }, {
+      onSettled: () => {
+        setOptimisticUserMessage(null);
+      }
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -230,7 +219,7 @@ export default function ChatPage() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [currentMessages.length, mutation.isPending]); // Use .length instead of the array reference
+  }, [currentMessages.length, createMessage.isPending]);
 
   if (authLoading || !user) {
     return <div className="flex h-screen items-center justify-center bg-zinc-50">Loading...</div>;
@@ -239,7 +228,7 @@ export default function ChatPage() {
   return (
     <SidebarProvider>
       <AppSidebar
-        chats={chats}
+        chats={displayChats}
         activeChatId={activeChatId}
         onSelectChat={handleSelectChat}
         onNewChat={handleNewChat}
@@ -316,7 +305,13 @@ export default function ChatPage() {
         {/* Chat Area */}
         <ScrollArea className="flex-1 w-full flex flex-col items-center pb-8" ref={scrollRef}>
           <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 md:px-8 py-6 flex flex-col gap-8">
-            {currentMessages.length === 1 && (
+            {isMessagesLoading && activeChatId !== "init-chat" && currentMessages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[50vh]">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#d97757]"></div>
+              </div>
+            ) : null}
+
+            {currentMessages.length === 1 && currentMessages[0].id === "init" && (
               <div className="flex flex-col items-center justify-center h-[40vh] text-center max-w-lg mx-auto space-y-4">
                 <Avatar className="h-16 w-16 bg-[#d97757] text-[#f4efe6]">
                   <AvatarFallback className="bg-[#d97757] text-[#f4efe6]">C</AvatarFallback>
@@ -347,26 +342,27 @@ export default function ChatPage() {
                   key={m.id + idx}
                   className={cn(
                     "flex w-full",
-                    m.role === "user" ? "justify-end" : "justify-start"
+                    m.role === "user" ? "justify-end" : "justify-start",
+                    m.id === "optimistic" ? "opacity-70" : "opacity-100"
                   )}
                 >
                   <div className={cn("flex max-w-[85%] gap-4 rounded-xl",
-                    m.role === "assistant" ? "" : "bg-[#f4f4f4] px-5 py-4"
+                    m.role !== "user" ? "" : "bg-[#f4f4f4] px-5 py-4"
                   )}>
-                    {m.role === "assistant" && (
+                    {m.role !== "user" && (
                       <Avatar className="h-8 w-8 mt-0.5 shrink-0 bg-[#d97757] text-[#f4efe6]">
                         <AvatarFallback className="bg-[#d97757] text-[#f4efe6]">C</AvatarFallback>
                       </Avatar>
                     )}
                     <div className="flex flex-col gap-1 w-full min-w-0">
-                      {m.role === "assistant" && (
+                      {m.role !== "user" && (
                         <span className="text-[14px] font-semibold text-zinc-800">Claude</span>
                       )}
                       {m.files && m.files.length > 0 && (
                         <div className="flex flex-wrap gap-2 mb-2 mt-1">
                           {m.files.map((f, i) => (
                             <div key={i} className="flex items-center gap-2 bg-white border border-zinc-200 shadow-sm rounded-xl pl-3 pr-3 py-2 shrink-0">
-                              {f.type.startsWith("image/") ? (
+                              {f.type && f.type.startsWith("image/") ? (
                                 <ImageIcon className="h-4 w-4 text-zinc-500" />
                               ) : (
                                 <FileText className="h-4 w-4 text-zinc-500" />
@@ -378,15 +374,15 @@ export default function ChatPage() {
                       )}
                       {m.content && (
                         <div className={cn(
-                          "prose prose-sm break-words max-w-none text-[15px] leading-relaxed",
-                          m.role === "assistant" ? "text-zinc-800" : "text-zinc-800"
+                          "prose prose-sm break-words max-w-none text-[15px] leading-relaxed whitespace-pre-wrap",
+                          m.role !== "user" ? "text-zinc-800" : "text-zinc-800"
                         )}>
                           {m.content}
                         </div>
                       )}
 
                       {/* Assistant Message Actions */}
-                      {m.role === "assistant" && (
+                      {m.role !== "user" && (
                         <div className="flex items-center gap-1 mt-2 -ml-2 text-zinc-400">
                           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
                             <Copy className="h-4 w-4" />
@@ -408,7 +404,7 @@ export default function ChatPage() {
               ) : null
             ))}
 
-            {mutation.isPending && (
+            {createMessage.isPending && (
               <div className="flex w-full justify-start">
                 <div className="flex max-w-[85%] gap-4">
                   <Avatar className="h-8 w-8 mt-0.5 shrink-0 bg-[#d97757] text-[#f4efe6]">
@@ -490,7 +486,7 @@ export default function ChatPage() {
               <Button
                 type="submit"
                 size="icon"
-                disabled={(!input.trim() && files.length === 0) || mutation.isPending}
+                disabled={(!input.trim() && files.length === 0) || createMessage.isPending}
                 className={cn(
                   "h-8 w-8 rounded-lg transition-all",
                   input.trim() || files.length > 0

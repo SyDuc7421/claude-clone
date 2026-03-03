@@ -44,7 +44,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     localStorage.setItem("auth_user", JSON.stringify(freshUser));
                 } catch (e) {
                     console.error("Token might be invalid", e);
+                    setUser(null);
+                    localStorage.removeItem("auth_user");
+                    localStorage.removeItem("access_token");
+                    localStorage.removeItem("refresh_token");
                 }
+            } else {
+                setUser(null);
+                localStorage.removeItem("auth_user");
             }
             setIsLoading(false);
         };
