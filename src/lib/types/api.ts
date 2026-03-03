@@ -41,6 +41,11 @@ export interface CreateMessageRequest {
     role: "user" | "assistant" | "system";
 }
 
+export interface CreateMessageResponse {
+    user_message: Message;
+    assistant_message: Message;
+}
+
 export interface LoginRequest {
     email: string;
     password?: string;

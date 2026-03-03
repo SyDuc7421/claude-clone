@@ -28,8 +28,6 @@ import {
   ChevronDown,
   ArrowUp,
   Globe,
-  MoreHorizontal,
-  PenLine,
   ThumbsUp,
   ThumbsDown,
   Copy,
@@ -52,6 +50,12 @@ import {
   useDeleteConversationMutation
 } from "@/hooks/useConversations";
 import { useMessages, useCreateMessageMutation } from "@/hooks/useMessages";
+import { Message } from "@/lib/types/api";
+
+export type UIMessage = Omit<Message, "id"> & {
+  id: number | string;
+  files?: { name: string; type: string }[];
+};
 
 export default function ChatPage() {
   const [input, setInput] = useState("");
@@ -66,14 +70,13 @@ export default function ChatPage() {
   const updateConversation = useUpdateConversationMutation();
   const deleteConversation = useDeleteConversationMutation();
 
-  const [activeChatId, setActiveChatId] = useState<string>("init-chat");
+  const [activeChatId, setActiveChatId] = useState<string>("");
 
   const { data: serverMessages, isLoading: isMessagesLoading } = useMessages(
-    activeChatId === "init-chat" || !activeChatId ? "" : activeChatId
+    activeChatId ? activeChatId : ""
   );
   const createMessage = useCreateMessageMutation();
 
-  const [optimisticUserMessage, setOptimisticUserMessage] = useState<{ content: string; files: any[] } | null>(null);
 
   const chats: ChatItem[] = (serverConversations || []).map((c) => ({
     id: c.id.toString(),
@@ -81,83 +84,55 @@ export default function ChatPage() {
     updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
   }));
 
-  // Add the virtual 'init-chat' if it's the active one
-  const displayChats = activeChatId === "init-chat"
-    ? [{ id: "init-chat", title: "New Chat", updatedAt: Date.now() }, ...chats]
-    : chats;
+  const [currentMessages, setCurrentMessages] = useState<UIMessage[]>([]);
 
-  // We map the server messages to our UI representation.
-  let currentMessages = activeChatId === "init-chat"
-    ? [
-      {
-        id: "init",
-        role: "assistant" as const,
-        content: "Hello! I am ready to help. I am built with Next.js, Shadcn UI, and TanStack Query. I now support multiple conversations too!",
-        files: [] as { name: string; type: string }[]
-      }
-    ]
-    : (serverMessages || []).map(m => ({
-      id: m.id.toString(),
-      role: m.role as "user" | "assistant" | "system",
-      content: m.content,
-      files: [] as { name: string; type: string }[]
-    }));
-
-  if (optimisticUserMessage) {
-    currentMessages = [
-      ...currentMessages,
-      {
-        id: "optimistic",
-        role: "user",
-        content: optimisticUserMessage.content,
-        files: optimisticUserMessage.files
-      }
-    ];
-  }
 
   // Ensure active chat selection on first load if we have chats
   useEffect(() => {
-    if (!isConversationsLoading && serverConversations && serverConversations.length > 0 && activeChatId === "init-chat") {
+    if (!isConversationsLoading && serverConversations && serverConversations.length > 0 && !activeChatId) {
       setActiveChatId(serverConversations[0].id.toString());
     }
   }, [serverConversations, isConversationsLoading, activeChatId]);
 
-  const handleNewChat = () => {
-    setActiveChatId("init-chat");
+  useEffect(() => {
+    if (serverMessages) {
+      setCurrentMessages(serverMessages);
+    }
+  }, [serverMessages]);
+
+  const handleNewChat = async () => {
+    const newConv = await createConversation.mutateAsync({ title: "New Chat" });
+    setActiveChatId(newConv.id.toString());
     setInput("");
     setFiles([]);
-    setOptimisticUserMessage(null);
+    setCurrentMessages([]);
   };
 
   const handleSelectChat = (id: string) => {
     setActiveChatId(id);
     setInput("");
     setFiles([]);
-    setOptimisticUserMessage(null);
+    setCurrentMessages([]);
   };
 
   const handleRenameChat = (id: string, newTitle: string) => {
-    if (id !== "init-chat") {
-      updateConversation.mutate({ id, data: { title: newTitle } });
-    }
+    updateConversation.mutate({ id, data: { title: newTitle } });
   };
 
   const handleDeleteChat = (id: string) => {
-    if (id !== "init-chat") {
-      deleteConversation.mutate(id, {
-        onSuccess: () => {
-          if (activeChatId === id) {
-            const index = chats.findIndex(c => c.id === id);
-            if (chats.length > 1) {
-              const nextChat = chats[index === 0 ? 1 : index - 1];
-              setActiveChatId(nextChat.id);
-            } else {
-              setActiveChatId("init-chat");
-            }
+    deleteConversation.mutate(id, {
+      onSuccess: () => {
+        if (activeChatId === id) {
+          const index = chats.findIndex(c => c.id === id);
+          if (chats.length > 1) {
+            const nextChat = chats[index === 0 ? 1 : index - 1];
+            setActiveChatId(nextChat.id);
+          } else {
+            setActiveChatId("");
           }
         }
-      });
-    }
+      }
+    });
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -177,33 +152,29 @@ export default function ChatPage() {
     let targetConversationId = activeChatId;
 
     const messageContent = input.trim();
-    const prompt = messageContent + (files.length > 0 ? ` [Attached ${files.length} file(s)]` : "");
 
-    // Set optimistic UI immediately
-    setOptimisticUserMessage({ content: messageContent, files: files.map(f => ({ name: f.name, type: f.type })) });
+
+    setCurrentMessages((prev) => [...prev, { content: messageContent, role: "user", id: Date.now(), conversation_id: parseInt(targetConversationId as string) }]);
     setInput("");
     setFiles([]);
 
-    if (targetConversationId === "init-chat") {
-      const generatedTitle = messageContent.slice(0, 30) + (messageContent.length > 30 ? "..." : "");
-      try {
-        const newConv = await createConversation.mutateAsync({ title: generatedTitle || "New Chat" });
-        targetConversationId = newConv.id.toString();
-        setActiveChatId(targetConversationId);
-      } catch (err) {
-        console.error("Failed to create conversation", err);
-        setOptimisticUserMessage(null);
-        return;
-      }
-    }
-
     createMessage.mutate({
-      content: prompt,
+      content: messageContent,
       conversation_id: parseInt(targetConversationId as string),
       role: "user"
     }, {
-      onSettled: () => {
-        setOptimisticUserMessage(null);
+      onSettled: (data, error) => {
+        if (data && data.user_message && data.assistant_message) {
+          setCurrentMessages((prev) => {
+            // remove sending message
+            prev.pop();
+            const newMessages = [...prev, data.user_message, data.assistant_message];
+            return newMessages;
+          });
+        }
+        if (error) {
+          console.error("Failed to create message", error);
+        }
       }
     });
   };
@@ -228,8 +199,8 @@ export default function ChatPage() {
   return (
     <SidebarProvider>
       <AppSidebar
-        chats={displayChats}
-        activeChatId={activeChatId}
+        chats={chats}
+        activeChatId={activeChatId || ""}
         onSelectChat={handleSelectChat}
         onNewChat={handleNewChat}
         onRenameChat={handleRenameChat}
@@ -305,13 +276,13 @@ export default function ChatPage() {
         {/* Chat Area */}
         <ScrollArea className="flex-1 w-full flex flex-col items-center pb-8" ref={scrollRef}>
           <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 md:px-8 py-6 flex flex-col gap-8">
-            {isMessagesLoading && activeChatId !== "init-chat" && currentMessages.length === 0 ? (
+            {isMessagesLoading && activeChatId && currentMessages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[50vh]">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#d97757]"></div>
               </div>
             ) : null}
 
-            {currentMessages.length === 1 && currentMessages[0].id === "init" && (
+            {currentMessages.length === 0 && !isMessagesLoading && !activeChatId && (
               <div className="flex flex-col items-center justify-center h-[40vh] text-center max-w-lg mx-auto space-y-4">
                 <Avatar className="h-16 w-16 bg-[#d97757] text-[#f4efe6]">
                   <AvatarFallback className="bg-[#d97757] text-[#f4efe6]">C</AvatarFallback>
@@ -319,89 +290,59 @@ export default function ChatPage() {
                 <h2 className="text-2xl font-medium tracking-tight text-zinc-800">
                   Good evening
                 </h2>
-                <div className="grid grid-cols-2 gap-3 w-full mt-8">
-                  <Button variant="outline" className="h-auto py-3 px-4 justify-start text-left text-[14px] text-zinc-600 font-normal rounded-xl hover:bg-zinc-50 border-zinc-200" onClick={() => setInput("Extract text from image")}>
-                    Extract text from image
-                  </Button>
-                  <Button variant="outline" className="h-auto py-3 px-4 justify-start text-left text-[14px] text-zinc-600 font-normal rounded-xl hover:bg-zinc-50 border-zinc-200" onClick={() => setInput("Help me write an essay")}>
-                    Help me write an essay
-                  </Button>
-                  <Button variant="outline" className="h-auto py-3 px-4 justify-start text-left text-[14px] text-zinc-600 font-normal rounded-xl hover:bg-zinc-50 border-zinc-200" onClick={() => setInput("Summarize an article")}>
-                    Summarize an article
-                  </Button>
-                  <Button variant="outline" className="h-auto py-3 px-4 justify-start text-left text-[14px] text-zinc-600 font-normal rounded-xl hover:bg-zinc-50 border-zinc-200" onClick={() => setInput("Brainstorm ideas")}>
-                    Brainstorm ideas
-                  </Button>
-                </div>
               </div>
             )}
 
             {currentMessages.map((m, idx) => (
-              m.id !== "init" || currentMessages.length > 1 ? (
-                <div
-                  key={m.id + idx}
-                  className={cn(
-                    "flex w-full",
-                    m.role === "user" ? "justify-end" : "justify-start",
-                    m.id === "optimistic" ? "opacity-70" : "opacity-100"
-                  )}
-                >
-                  <div className={cn("flex max-w-[85%] gap-4 rounded-xl",
-                    m.role !== "user" ? "" : "bg-[#f4f4f4] px-5 py-4"
-                  )}>
-                    {m.role !== "user" && (
-                      <Avatar className="h-8 w-8 mt-0.5 shrink-0 bg-[#d97757] text-[#f4efe6]">
-                        <AvatarFallback className="bg-[#d97757] text-[#f4efe6]">C</AvatarFallback>
-                      </Avatar>
-                    )}
-                    <div className="flex flex-col gap-1 w-full min-w-0">
-                      {m.role !== "user" && (
-                        <span className="text-[14px] font-semibold text-zinc-800">Claude</span>
-                      )}
-                      {m.files && m.files.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mb-2 mt-1">
-                          {m.files.map((f, i) => (
-                            <div key={i} className="flex items-center gap-2 bg-white border border-zinc-200 shadow-sm rounded-xl pl-3 pr-3 py-2 shrink-0">
-                              {f.type && f.type.startsWith("image/") ? (
-                                <ImageIcon className="h-4 w-4 text-zinc-500" />
-                              ) : (
-                                <FileText className="h-4 w-4 text-zinc-500" />
-                              )}
-                              <span className="text-[13px] font-medium text-zinc-700 max-w-[150px] truncate">{f.name}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {m.content && (
-                        <div className={cn(
-                          "prose prose-sm break-words max-w-none text-[15px] leading-relaxed whitespace-pre-wrap",
-                          m.role !== "user" ? "text-zinc-800" : "text-zinc-800"
-                        )}>
-                          {m.content}
-                        </div>
-                      )}
 
-                      {/* Assistant Message Actions */}
-                      {m.role !== "user" && (
-                        <div className="flex items-center gap-1 mt-2 -ml-2 text-zinc-400">
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
-                            <RotateCcw className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
-                            <ThumbsUp className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
-                            <ThumbsDown className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      )}
-                    </div>
+              <div
+                key={`${m.id}-${idx}`}
+                className={cn(
+                  "flex w-full",
+                  m.role === "user" ? "justify-end" : "justify-start",
+                )}
+              >
+                <div className={cn("flex max-w-[85%] gap-4 rounded-xl",
+                  m.role !== "user" ? "" : "bg-[#f4f4f4] px-5 py-4"
+                )}>
+                  {m.role !== "user" && (
+                    <Avatar className="h-8 w-8 mt-0.5 shrink-0 bg-[#d97757] text-[#f4efe6]">
+                      <AvatarFallback className="bg-[#d97757] text-[#f4efe6]">C</AvatarFallback>
+                    </Avatar>
+                  )}
+                  <div className="flex flex-col gap-1 w-full min-w-0">
+                    {m.role !== "user" && (
+                      <span className="text-[14px] font-semibold text-zinc-800">Chat Bot</span>
+                    )}
+                    {m.content && (
+                      <div className={cn(
+                        "prose prose-sm break-words max-w-none text-[15px] leading-relaxed whitespace-pre-wrap",
+                        m.role !== "user" ? "text-zinc-800" : "text-zinc-800"
+                      )}>
+                        {m.content}
+                      </div>
+                    )}
+
+                    {/* Assistant Message Actions */}
+                    {m.role !== "user" && (
+                      <div className="flex items-center gap-1 mt-2 -ml-2 text-zinc-400">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
+                          <RotateCcw className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
+                          <ThumbsUp className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-zinc-700">
+                          <ThumbsDown className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
-              ) : null
+              </div>
             ))}
 
             {createMessage.isPending && (
@@ -411,7 +352,7 @@ export default function ChatPage() {
                     <AvatarFallback className="bg-[#d97757] text-[#f4efe6]">C</AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col gap-1">
-                    <span className="text-[14px] font-semibold text-zinc-800">Claude</span>
+                    <span className="text-[14px] font-semibold text-zinc-800">Chat Bot</span>
                     <div className="flex items-center gap-1 h-6">
                       <span className="h-2 w-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
                       <span className="h-2 w-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
@@ -455,7 +396,7 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="How can Claude help you today?"
+              placeholder="How can Chat Bot help you today?"
               className="resize-none min-h-[50px] max-h-[250px] bg-transparent border-0 focus-visible:ring-0 py-3.5 px-4 text-[15px] placeholder:text-zinc-400 scrollbar-thin"
               rows={1}
               style={{ height: 'auto', minHeight: '60px' }}
@@ -499,7 +440,7 @@ export default function ChatPage() {
             </div>
           </form>
           <div className="text-center mt-3 text-xs text-zinc-500 font-medium">
-            Claude can make mistakes. Please double-check responses.
+            Chat Box can make mistakes. Please double-check responses.
           </div>
         </div>
       </div>

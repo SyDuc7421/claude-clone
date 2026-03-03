@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { Message, CreateMessageRequest, UpdateMessageRequest } from '../types/api';
+import { Message, CreateMessageRequest, UpdateMessageRequest, CreateMessageResponse } from '../types/api';
 
 export const messagesApi = {
     getByConversationId: async (conversationId: number | string) => {
@@ -15,7 +15,7 @@ export const messagesApi = {
     },
 
     create: async (data: CreateMessageRequest) => {
-        const response = await apiClient.post<Message>('/messages', data);
+        const response = await apiClient.post<CreateMessageResponse>('/messages', data);
         return response.data;
     },
 

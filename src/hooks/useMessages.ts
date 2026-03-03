@@ -24,11 +24,6 @@ export const useCreateMessageMutation = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: (data: CreateMessageRequest) => messagesApi.create(data),
-        onSuccess: (_, variables) => {
-            queryClient.invalidateQueries({
-                queryKey: [MESSAGES_QUERY_KEY, 'conversation', variables.conversation_id]
-            });
-        },
     });
 };
 
